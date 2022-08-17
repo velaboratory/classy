@@ -32,14 +32,13 @@ def get_period(channel: str): #if the period is active, it'll return the period,
         current_day = lt.date()
         start_day = parser.parse(cl["start_date"]).date()
         end_day = parser.parse(cl["end_date"]).date()
-
-        if (current_day < start_day) or (current_day > end_day): continue
+        exceptions = [parser.parse(d).date() for d in cl["exceptions"]]
+        if (current_day < start_day) or (current_day > end_day) or (current_day in exceptions): continue
 
         #check the periods
         for period in cl["periods"]:
             start_time = datetime.strptime(period["start"],"%I:%M %p").time()
             end_time = datetime.strptime(period['end'],"%I:%M %p").time()
-            print(start_time,end_time,dayname)
             if (period["day"] == dayname) and (lt.time() >= start_time) and (lt.time() < end_time):
                 return period
     return None
