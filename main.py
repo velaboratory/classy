@@ -51,12 +51,17 @@ async def checkin(ctx: commands.Context):
     await ctx.message.delete()
     period = get_period(ctx.channel.name)
     if period:
-        with db_connection() as con:
-            df = pd.DataFrame({"course":[ctx.channel.name],"member":[member.nick],"discord_id":[member.name],"time":[datetime.now().strftime("%Y-%m-%d %H:%M:%S")],"index":[0]})
-            df.to_sql("checkins",con,index=False,if_exists='append')
-        await member.send("You are checked in")
+        if member.name not in period["checked_in"]:
+            with db_connection() as con:
+                df = pd.DataFrame({"course":[ctx.channel.name],"member":[member.nick],"discord_id":[member.name],"time":[datetime.now().strftime("%Y-%m-%d %H:%M:%S")],"index":[0]})
+                df.to_sql("checkins",con,index=False,if_exists='append')
+            period["checked_in"].append(member.name)
+            await member.send("You are checked in")
+        else:
+            await member.send("You were already checked in")
+        
     else:
-        await member.send("The period is not valid")
+        await member.send("The period is not active")
 
 @bot.command()
 async def attendance(ctx: commands.Context):
@@ -67,9 +72,11 @@ async def attendance(ctx: commands.Context):
 
     if discord.utils.get(member.roles, name="Admin"): 
         with db_connection() as con:
-            df = pd.read_sql("select member from checkins where course=? and date(time)=?",con,params=(ctx.channel.name,datetime.now().strftime("%Y-%m-%d")))
+            df = pd.read_sql("select distinct member from checkins where course=? and date(time)=?",con,params=(ctx.channel.name,datetime.now().strftime("%Y-%m-%d")))
             await member.send(df.to_string(index=False))
-    
+    else:
+        with db_connection() as con:
+            df = pd.read_sql("select date from checkins where course=? and discord_id=?",con,params=(channel.name,member.name))
 
 @bot.event
 async def on_ready():
