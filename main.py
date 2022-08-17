@@ -52,12 +52,24 @@ async def checkin(ctx: commands.Context):
     period = get_period(ctx.channel.name)
     if period:
         with db_connection() as con:
-            df = pd.DataFrame({"course":[ctx.channel.name],"member":[member.nick],"discord_id":[member.name],"time":[datetime.now().strftime("%m/%d/%Y %H:%M:%S")],"index":[0]})
+            df = pd.DataFrame({"course":[ctx.channel.name],"member":[member.nick],"discord_id":[member.name],"time":[datetime.now().strftime("%Y-%m-%d %H:%M:%S")],"index":[0]})
             df.to_sql("checkins",con,index=False,if_exists='append')
         await member.send("You are checked in")
     else:
         await member.send("The period is not valid")
 
+@bot.command()
+async def attendance(ctx: commands.Context):
+    #get the channel
+    channel = ctx.channel
+    member: discord.Member = ctx.author
+    await ctx.message.delete()
+
+    if discord.utils.get(member.roles, name="Admin"): 
+        with db_connection() as con:
+            df = pd.read_sql("select member from checkins where course=? and date(time)=?",con,params=(ctx.channel.name,datetime.now().strftime("%Y-%m-%d")))
+            await member.send(df.to_string(index=False))
+    
 
 @bot.event
 async def on_ready():
@@ -116,7 +128,7 @@ async def check_schedule(): # we need to check the schedule to determine if we s
                 period["last_sent"] = lt
                 #now send the message as a reminder to login
                 channel = discord.utils.get(bot.guilds[0].channels,name=cl["channel"])
-                period["checked_in"] = []
+                period["checked_in"] = [] #cheap way to get rid of the checked_in list
                 role = discord.utils.get(bot.guilds[0].roles,name=cl["role"])
                 await channel.send(f"{role.mention} time to check in (!checkin)")
                             
