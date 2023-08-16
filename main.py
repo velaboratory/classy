@@ -107,6 +107,10 @@ async def on_message(message: discord.Message):
                 return
             name_parts = parts[3:]
         name = " ".join(name_parts)
+        if name.strip() == "":
+            await message.author.send("Invalid name, please use your full name")
+            return
+        
         guild = bot.guilds[0]
         role = discord.utils.get(guild.roles,name=cl["role"])
         member = guild.get_member(message.author.id)
