@@ -2,7 +2,7 @@
 import asyncio
 import json
 import discord
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil import parser
 import time
 import pytz
@@ -43,6 +43,27 @@ def get_period(channel: str): #if the period is active, it'll return the period,
                 return period
     return None
 
+def get_end_of_period(channel: str): #if the period was active, and then is not active, it'll return the period, otherwise it'll return None
+    for cl in classes:
+
+        if cl["channel"] != channel: continue #this is not the channel you are looking for (probably should have used a dictionary)
+
+        lt = datetime.now().astimezone(tz=pytz.timezone(cl["tz"]))
+        dayname = lt.strftime("%A").lower()
+        current_day = lt.date()
+        start_day = parser.parse(cl["start_date"]).date()
+        end_day = parser.parse(cl["end_date"]).date()
+        exceptions = [parser.parse(d).date() for d in cl["exceptions"]]
+        if (current_day < start_day) or (current_day > end_day) or (current_day in exceptions): continue
+
+        #check the periods
+        for period in cl["periods"]:
+            start_time = datetime.strptime(period["start"],"%I:%M %p").time()
+            end_time = (datetime.strptime(period['end'],"%I:%M %p") - timedelta(minutes=5)).time() #5 minutes before end
+            if (period["day"] == dayname) and (lt.hour == end_time.hour) and (lt.minute == end_time.minute):
+                return period
+    return None
+
 @bot.command()
 async def checkin(ctx: commands.Context):
     #get the channel
@@ -70,13 +91,14 @@ async def attendance(ctx: commands.Context):
     member: discord.Member = ctx.author
     await ctx.message.delete()
 
-    if discord.utils.get(member.roles, name="Admin"): 
+    if discord.utils.get(member.roles, name="Instructor"): 
         with db_connection() as con:
             df = pd.read_sql("select distinct member from checkins where course=? and date(time)=?",con,params=(ctx.channel.name,datetime.now().strftime("%Y-%m-%d")))
             await member.send(df.to_string(index=False))
     else:
         with db_connection() as con:
-            df = pd.read_sql("select date from checkins where course=? and discord_id=?",con,params=(channel.name,member.name))
+            df = pd.read_sql("select time from checkins where course=? and discord_id=?",con,params=(channel.name,member.name))
+            await member.send(df.to_string(index=False))
 
 @bot.event
 async def on_ready():
@@ -140,9 +162,17 @@ async def check_schedule(): # we need to check the schedule to determine if we s
                 #now send the message as a reminder to login
                 channel = discord.utils.get(bot.guilds[0].channels,name=cl["channel"])
                 period["checked_in"] = [] #cheap way to get rid of the checked_in list
+                period["sent_end_of_day"] = False #need to send the end of day
                 role = discord.utils.get(bot.guilds[0].roles,name=cl["role"])
                 await channel.send(f"{role.mention} time to check in (!checkin)")
-                            
+            period = get_end_of_period(cl["channel"])
+            if period == None: continue
+            if ("last_sent" in period) and (period["last_sent"].date() == current_day) and (("sent_end_of_day" not in period) or (not period["sent_end_of_day"])):
+                period["sent_end_of_day"] = True
+                role = discord.utils.get(bot.guilds[0].roles,name=cl["role"])
+                await channel.send(f"{role.mention} last chance to check in (!checkin)")
+                
+                
 
 bot.loop.create_task(check_schedule())
 bot.run(config["key"])
