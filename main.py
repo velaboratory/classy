@@ -7,6 +7,7 @@ from datetime import datetime
 from dateutil import parser
 import time
 import pytz
+import random
 from discord.ext import commands
 import sqlite3
 import pandas as pd
@@ -33,6 +34,28 @@ intents.messages = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix='!',intents=intents)
+queues = {} # channel_id -> list of members
+queue_messages = {} # channel_id -> discord.Message
+
+async def update_queue_display(channel_id):
+    if channel_id not in queue_messages:
+        return
+    
+    message = queue_messages[channel_id]
+    q = queues.get(channel_id, [])
+    
+    msg = "**Current Queue:**\n"
+    if not q:
+        msg += "The queue is empty."
+    else:
+        for i, member in enumerate(q):
+            msg += f"{i+1}. {member.display_name}\n"
+            
+    try:
+        await message.edit(content=msg)
+    except (discord.NotFound, discord.HTTPException):
+        if channel_id in queue_messages:
+            del queue_messages[channel_id]
 
 def db_connection():
     return sqlite3.connect("classes.db")
@@ -321,6 +344,115 @@ class RegisterSelect(discord.ui.Select):
 async def register(interaction: discord.Interaction):
     await interaction.response.send_message("Please select a class:", view=discord.ui.View().add_item(RegisterSelect()), ephemeral=True)
 
+class AskView(discord.ui.View):
+    def __init__(self, author: discord.Member):
+        super().__init__(timeout=None)
+        self.author = author
+    
+    @discord.ui.button(label="Reveal Author (Admin)", style=discord.ButtonStyle.secondary, custom_id="ask_reveal")
+    async def reveal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if hasattr(interaction.user, "roles") and discord.utils.get(interaction.user.roles, name="Admin"):
+            await interaction.response.send_message(f"Asked by: {self.author.mention}", ephemeral=True)
+        else:
+            await interaction.response.send_message("Only admins can reveal the author.", ephemeral=True)
+
+@bot.tree.command(name="ask", description="Ask a question anonymously")
+async def ask(interaction: discord.Interaction, question: str):
+    embed = discord.Embed(title="Anonymous Question", description=question, color=0xFFA500)
+    await interaction.channel.send(embed=embed, view=AskView(interaction.user))
+    await interaction.response.send_message("Question sent anonymously.", ephemeral=True)
+
+class QueueGroup(discord.app_commands.Group):
+    def __init__(self):
+        super().__init__(name="queue", description="Manage the class queue")
+
+    @discord.app_commands.command(name="join", description="Join the queue")
+    async def join(self, interaction: discord.Interaction):
+        if interaction.channel_id not in queues:
+            queues[interaction.channel_id] = []
+        
+        q = queues[interaction.channel_id]
+        if any(u.id == interaction.user.id for u in q):
+            await interaction.response.send_message("You are already in the queue.", ephemeral=True)
+            return
+        
+        q.append(interaction.user)
+        await interaction.response.send_message(f"Joined the queue. Position: {len(q)}", ephemeral=True)
+        await update_queue_display(interaction.channel_id)
+
+    @discord.app_commands.command(name="leave", description="Leave the queue")
+    async def leave(self, interaction: discord.Interaction):
+        q = queues.get(interaction.channel_id, [])
+        
+        original_len = len(q)
+        queues[interaction.channel_id] = [u for u in q if u.id != interaction.user.id]
+        
+        if len(queues[interaction.channel_id]) < original_len:
+            await interaction.response.send_message("You have left the queue.", ephemeral=True)
+            await update_queue_display(interaction.channel_id)
+        else:
+            await interaction.response.send_message("You are not in the queue.", ephemeral=True)
+
+    @discord.app_commands.command(name="list", description="View the current queue")
+    async def list_queue(self, interaction: discord.Interaction):
+        q = queues.get(interaction.channel_id, [])
+        
+        msg = "**Current Queue:**\n"
+        if not q:
+            msg += "The queue is empty."
+        else:
+            for i, member in enumerate(q):
+                msg += f"{i+1}. {member.display_name}\n"
+        
+        if interaction.channel_id in queue_messages:
+            try: await queue_messages[interaction.channel_id].delete()
+            except: pass
+        await interaction.response.send_message(msg)
+        queue_messages[interaction.channel_id] = await interaction.original_response()
+
+    @discord.app_commands.command(name="next", description="Call the next student (Admin only)")
+    async def next_student(self, interaction: discord.Interaction):
+        if not (hasattr(interaction.user, "roles") and discord.utils.get(interaction.user.roles, name="Admin")):
+            await interaction.response.send_message("Only admins can use this.", ephemeral=True)
+            return
+
+        q = queues.get(interaction.channel_id, [])
+        if not q:
+            await interaction.response.send_message("The queue is empty.", ephemeral=True)
+            return
+        
+        member = q.pop(0)
+        await interaction.response.send_message(f"Next up: {member.mention}")
+        await update_queue_display(interaction.channel_id)
+
+    @discord.app_commands.command(name="clear", description="Clear the queue (Admin only)")
+    async def clear(self, interaction: discord.Interaction):
+        if not (hasattr(interaction.user, "roles") and discord.utils.get(interaction.user.roles, name="Admin")):
+            await interaction.response.send_message("Only admins can use this.", ephemeral=True)
+            return
+        
+        queues[interaction.channel_id] = []
+        await interaction.response.send_message("Queue cleared.")
+        await update_queue_display(interaction.channel_id)
+
+bot.tree.add_command(QueueGroup())
+
+@bot.tree.command(name="coldcall", description="Pick a random student who is checked in")
+async def coldcall(interaction: discord.Interaction):
+    if not (hasattr(interaction.user, "roles") and discord.utils.get(interaction.user.roles, name="Admin")):
+        await interaction.response.send_message("Only admins can use this.", ephemeral=True)
+        return
+    
+    channel = interaction.channel
+    with db_connection() as con:
+        df = pd.read_sql("select distinct member from checkins where course=? and date(time)=?", con, params=(channel.name, datetime.now().strftime("%Y-%m-%d")))
+    
+    if df.empty:
+        await interaction.response.send_message("No students are checked in yet.", ephemeral=True)
+    else:
+        student = df.sample().iloc[0]['member']
+        await interaction.response.send_message(f"🎲 Random Pick: **{student}**")
+
 @bot.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(bot))
@@ -365,7 +497,7 @@ async def check_schedule(): # we need to check the schedule to determine if we s
                 channel = discord.utils.get(bot.guilds[0].channels,name=cl["channel"])
                 period["checked_in"] = [] #cheap way to get rid of the checked_in list
                 role = discord.utils.get(bot.guilds[0].roles,name=cl["role"])
-                await channel.send(f"{role.mention} time to check in (!checkin)")
+                await channel.send(f"{role.mention} time to check in.")
                             
 
 bot.run(config["key"])
