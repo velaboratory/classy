@@ -138,6 +138,13 @@ class PollView(discord.ui.View):
                 return
             self.votes[interaction.user.id] = index
             await interaction.response.send_message(f"Vote recorded for: {label}", ephemeral=True)
+            
+            try:
+                embed = interaction.message.embeds[0]
+                embed.set_footer(text=f"Total Votes: {len(self.votes)}")
+                await interaction.message.edit(embed=embed)
+            except Exception as e:
+                print(f"Error updating vote count: {e}")
         return callback
 
     async def end_poll_callback(self, interaction: discord.Interaction):
@@ -210,6 +217,14 @@ class PollAnswerModal(discord.ui.Modal):
         else:
              await interaction.response.send_message("Answer recorded.", ephemeral=True)
         self.view_ref.answers[interaction.user.id] = self.answer.value
+
+        try:
+            if interaction.message:
+                embed = interaction.message.embeds[0]
+                embed.set_footer(text=f"Total Responses: {len(self.view_ref.answers)}")
+                await interaction.message.edit(embed=embed)
+        except Exception as e:
+            print(f"Error updating response count: {e}")
 
 class OpenPollView(discord.ui.View):
     def __init__(self, question: str, author: discord.Member):
@@ -359,7 +374,11 @@ class AskView(discord.ui.View):
 @bot.tree.command(name="ask", description="Ask a question anonymously")
 async def ask(interaction: discord.Interaction, question: str):
     embed = discord.Embed(title="Anonymous Question", description=question, color=0xFFA500)
-    await interaction.channel.send(embed=embed, view=AskView(interaction.user))
+    
+    prof = discord.utils.get(interaction.guild.members, name="profkyle")
+    content = f"{prof.mention} New question!" if prof else "New question!"
+
+    await interaction.channel.send(content=content, embed=embed, view=AskView(interaction.user))
     await interaction.response.send_message("Question sent anonymously.", ephemeral=True)
 
 class QueueGroup(discord.app_commands.Group):
