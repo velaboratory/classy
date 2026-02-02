@@ -35,6 +35,7 @@ To run classy, you need to create a config.json file in the root with the follow
 {
     "key":"YOURBOTKEYFROMDISCORDDEVELOPERPAGE",
     "gemini_api_key": "YOUR_GEMINI_API_KEY (Optional, for AI poll summaries)",
+    "notify_user": "profkyle",
     "classes":
      [
         {

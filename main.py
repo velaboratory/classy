@@ -375,7 +375,8 @@ class AskView(discord.ui.View):
 async def ask(interaction: discord.Interaction, question: str):
     embed = discord.Embed(title="Anonymous Question", description=question, color=0xFFA500)
     
-    prof = discord.utils.get(interaction.guild.members, name="profkyle")
+    notify_name = config.get("notify_user")
+    prof = discord.utils.get(interaction.guild.members, name=notify_name) if notify_name else None
     content = f"{prof.mention} New question!" if prof else "New question!"
 
     await interaction.channel.send(content=content, embed=embed, view=AskView(interaction.user))
