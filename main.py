@@ -202,7 +202,11 @@ class PollView(discord.ui.View):
         pd.DataFrame(results_data).to_csv(filename, index=False)
         details += f"\nResults saved to `{filename}`"
         
-        await interaction.followup.send(details, ephemeral=True)
+        try:
+            await interaction.user.send(details, file=discord.File(filename))
+            await interaction.followup.send("Detailed results have been sent to your DMs.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"Error sending DM: {e}. {details}", ephemeral=True)
 
 class PollAnswerModal(discord.ui.Modal):
     def __init__(self, view_ref):
@@ -279,7 +283,12 @@ class OpenPollView(discord.ui.View):
         if len(final_content) > 2000:
             final_content = final_content[:1990] + "..."
         await interaction.message.edit(content=final_content, embed=None, view=self)
-        await interaction.followup.send(f"Detailed responses saved to `{filename}`", ephemeral=True)
+        
+        try:
+             await interaction.user.send(f"Detailed responses for: {self.question}", file=discord.File(filename))
+             await interaction.followup.send("Detailed responses have been sent to your DMs.", ephemeral=True)
+        except Exception as e:
+             await interaction.followup.send(f"Error sending DM: {e}. Detailed responses saved to `{filename}`", ephemeral=True)
 
 @bot.tree.command(name="poll", description="Create a poll")
 @discord.app_commands.describe(question="The question to ask", options="Comma separated list of options (e.g. Yes,No)", open_ended="Set to True for text answers")
