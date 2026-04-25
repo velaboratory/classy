@@ -111,8 +111,39 @@ async def attendance(interaction: discord.Interaction):
             await interaction.response.send_message(f"```{df.to_string(index=False)}```", ephemeral=True)
     else:
         with db_connection() as con:
-            df = pd.read_sql("select date from checkins where course=? and discord_id=?",con,params=(channel.name,member.name))
-            await interaction.response.send_message(f"```{df.to_string(index=False)}```", ephemeral=True)
+            dates_df = pd.read_sql(
+                "select distinct date(time) as date from checkins where course=? and discord_id=? order by date",
+                con, params=(channel.name, member.name))
+            counts_df = pd.read_sql(
+                "select discord_id, count(distinct date(time)) as cnt from checkins where course=? group by discord_id",
+                con, params=(channel.name,))
+            total_sessions_df = pd.read_sql(
+                "select count(distinct date(time)) as cnt from checkins where course=?",
+                con, params=(channel.name,))
+
+        total_sessions = int(total_sessions_df["cnt"].iloc[0]) if not total_sessions_df.empty else 0
+        my_count = len(dates_df)
+
+        if total_sessions == 0:
+            await interaction.response.send_message("No class sessions have been recorded yet.", ephemeral=True)
+            return
+
+        n_students = len(counts_df)
+        avg = float(counts_df["cnt"].mean()) if n_students else 0.0
+        if my_count > 0:
+            rank = int((counts_df["cnt"] > my_count).sum()) + 1
+            rank_text = f"Rank: **{rank} of {n_students}** (class average: {avg:.1f})"
+        else:
+            rank_text = f"You have no recorded check-ins yet (class average: {avg:.1f})."
+
+        dates_str = dates_df["date"].to_string(index=False) if my_count > 0 else "(none)"
+        msg = (
+            f"**Your attendance for {channel.name}**\n"
+            f"```\n{dates_str}\n```\n"
+            f"Attended: **{my_count} / {total_sessions}** sessions\n"
+            f"{rank_text}"
+        )
+        await interaction.response.send_message(msg, ephemeral=True)
 
 class PollView(discord.ui.View):
     def __init__(self, question: str, options: list[str], author: discord.Member):
