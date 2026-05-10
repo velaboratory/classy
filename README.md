@@ -28,6 +28,7 @@ The bot gives roles if they register for the class.  This can be password protec
 *   **/queue next**: Call the next student in the queue.
 *   **/queue clear**: Clear the entire queue.
 *   **/attendance**: (Admin only) View the list of students checked in for the current session.
+*   **/export_attendance**: (Admin only) Export full class attendance as a CSV (one row per student, one column per session date, plus total and percent). DM'd to the requester.
 
 To run classy, you need to create a config.json file in the root with the following:
 

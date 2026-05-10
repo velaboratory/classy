@@ -145,6 +145,55 @@ async def attendance(interaction: discord.Interaction):
         )
         await interaction.response.send_message(msg, ephemeral=True)
 
+@bot.tree.command(name="export_attendance", description="Export full class attendance as CSV (Admin only)")
+async def export_attendance(interaction: discord.Interaction):
+    member = interaction.user
+    channel = interaction.channel
+
+    if not (hasattr(member, "roles") and discord.utils.get(member.roles, name="Admin")):
+        await interaction.response.send_message("Only admins can use this.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    with db_connection() as con:
+        df = pd.read_sql(
+            "select discord_id, member, date(time) as date from checkins where course=?",
+            con, params=(channel.name,))
+
+    if df.empty:
+        await interaction.followup.send("No checkin records for this course.", ephemeral=True)
+        return
+
+    # Use the most recent non-empty display name for each discord_id
+    named = df[df["member"].notna() & (df["member"].astype(str) != "")]
+    latest_names = named.sort_values("date").groupby("discord_id")["member"].last()
+
+    df["present"] = 1
+    pivot = (df.drop_duplicates(["discord_id", "date"])
+               .pivot(index="discord_id", columns="date", values="present")
+               .fillna(0).astype(int))
+    pivot = pivot.reindex(sorted(pivot.columns), axis=1)
+
+    n_sessions = pivot.shape[1]
+    pivot["total"] = pivot.sum(axis=1)
+    pivot["percent"] = (pivot["total"] / n_sessions * 100).round(1)
+    pivot.insert(0, "member", pivot.index.map(latest_names).fillna(""))
+    pivot = pivot.sort_values(["total", "member"], ascending=[False, True])
+
+    if not os.path.exists("exports"):
+        os.makedirs("exports")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"exports/{channel.name}_{timestamp}.csv"
+    pivot.to_csv(filename)
+
+    summary = f"**Attendance export for {channel.name}**\nSessions: {n_sessions} | Students: {len(pivot)}"
+    try:
+        await interaction.user.send(summary, file=discord.File(filename))
+        await interaction.followup.send(f"Sent to your DMs. Saved at `{filename}`.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"Could not DM ({e}). File saved at `{filename}`.", ephemeral=True)
+
 class PollView(discord.ui.View):
     def __init__(self, question: str, options: list[str], author: discord.Member):
         super().__init__(timeout=None)
