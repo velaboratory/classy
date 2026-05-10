@@ -565,11 +565,15 @@ async def coldcall(interaction: discord.Interaction):
 @bot.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(bot))
+    # one-time cleanup: remove any global command registrations (we use per-guild sync,
+    # and previous versions of on_ready also pushed globally, causing duplicates)
+    try:
+        await bot.http.bulk_upsert_global_commands(bot.application_id, [])
+    except Exception as e:
+        print(f"Warning: could not clear global commands: {e}")
     for guild in bot.guilds:
         bot.tree.copy_global_to(guild=guild)
         await bot.tree.sync(guild=guild)
-    else:
-        await bot.tree.sync()
     if not hasattr(bot, "schedule_started"):
         bot.loop.create_task(check_schedule())
         bot.schedule_started = True
